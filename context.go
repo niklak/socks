@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
 )
 
 func DialContext(proxyURI string) func(context.Context, string, string) (net.Conn, error) {
@@ -36,11 +35,10 @@ func (cfg *Config) dialContextSocks5(ctx context.Context,targetAddr string) (con
 
 	// dial TCP
 	//conn, err = net.Dial("tcp", proxy)
-	conn , err = (&net.Dialer{}).DialContext(ctx,"tcp", proxy)
+	conn , err = (&net.Dialer{Timeout:cfg.Timeout}).DialContext(ctx,"tcp", proxy)
 	if err != nil {
 		return
 	}
-
 	// version identifier/method selection request
 	req := []byte{
 		5, // version number
@@ -78,7 +76,7 @@ func (cfg *Config) dialContextSocks5(ctx context.Context,targetAddr string) (con
 		byte(port >> 8), // higher byte of destination port
 		byte(port),      // lower byte of destination port (big endian)
 	}...)
-	resp, err = cfg.sendReceive(conn, req)
+	resp, err = cfg.sendReceive2(conn, req)
 	if err != nil {
 		return
 	} else if len(resp) != 10 {
@@ -96,8 +94,8 @@ func (cfg *Config) dialContextSocks4(ctx context.Context,targetAddr string) (con
 	proxy := cfg.Host
 
 	// dial TCP
-	//conn, err = net.Dial("tcp", proxy)
-	conn , err = (&net.Dialer{}).DialContext(ctx,"tcp", proxy)
+	conn , err = (&net.Dialer{Timeout:cfg.Timeout}).DialContext(ctx,"tcp", proxy)
+	//conn , err = (&net.Dialer{Deadline: time.Now().Add(cfg.Timeout)}).DialContext(ctx,"tcp", proxy)
 	if err != nil {
 		return
 	}
@@ -126,7 +124,7 @@ func (cfg *Config) dialContextSocks4(ctx context.Context,targetAddr string) (con
 		req = append(req, []byte(host+"\x00")...)
 	}
 
-	resp, err := cfg.sendReceive(conn, req)
+	resp, err := cfg.sendReceive2(conn, req)
 	if err != nil {
 		return
 	} else if len(resp) != 8 {
@@ -146,9 +144,9 @@ func (cfg *Config) dialContextSocks4(ctx context.Context,targetAddr string) (con
 		err = errors.New("Socks connection request failed, unknown error.")
 	}
 	// clear the deadline before returning
-	if err := conn.SetDeadline(time.Time{}); err != nil {
+	/*if err := conn.SetDeadline(time.Time{}); err != nil {
 		return nil, err
-	}
+	}*/
 	return
 }
 
@@ -156,4 +154,19 @@ func dialContextError(err error) func(context.Context, string, string) (net.Conn
 	return func(_ context.Context, _, _ string) (net.Conn, error) {
 		return nil, err
 	}
+}
+
+func (cfg *Config) sendReceive2(conn net.Conn, req []byte) (resp []byte, err error) {
+	if _, err = conn.Write(req);err != nil {
+		return
+	}
+	resp, err = cfg.readAll2(conn)
+	return
+}
+
+func (cfg *Config) readAll2(conn net.Conn) (resp []byte, err error) {
+	resp = make([]byte, 1024)
+	n, err := conn.Read(resp)
+	resp = resp[:n]
+	return
 }
